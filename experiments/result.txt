@@ -1,0 +1,3 @@
+resnet+layernorm:f1=0.5695,acc=0.5720
+resnet+batchnorm:f1=0.7887,acc=0.7899
+resnet+dropout:f1=0.7294,acc=0.7572
