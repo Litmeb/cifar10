@@ -1,0 +1,219 @@
+\documentclass{article}
+
+% Language setting
+% Replace `english' with e.g. `spanish' to change the document language
+\usepackage[english]{babel}
+
+% Set page size and margins
+% Replace `letterpaper' with `a4paper' for UK/EU standard size
+\usepackage[letterpaper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+
+% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+
+\title{Report for cifar-10 classifying task}
+\author{Zhengye Bao}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+In this project, I present an intermediate classifier that is trained from the cifar-10 dataset with an accuracy rate of 81.10\% in its test set within 20 epochs. Moreover, I conducted several explorations into the model structure, data augment, and parameter tuning. Detailed information is as follows. 
+\end{abstract}
+
+\section{Methods}
+\subsection{baseline}
+I select resnet, ViT, and the classical Alexnet as my baseline.
+\subsection{Model structure}
+For resnet, I designed a structure as \ref{figure 1} shows.
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{resnet.drawio.png}
+    \caption{resnet structure}
+    \label{figure 1}
+\end{figure}
+For ViT, I designed 4 transformer layers whose FFN is 64 dimensions and head number is 4. Each patch tokenized is in 4x4 size.
+For Alexnet, I maintain the original structure without any changes(in following parts of this report, I would name Alexnet as cnn for simplicity).
+\subsection{hyperparameter tuning (for resnet)}
+default setting: optimizer=AdamW, initialization=He uniform
+\subsubsection{conv kernel size}
+There could be 5 different kernels in resnet, so I tried different strategies in \ref{figure 2} (each number s stands for sxs kernel size of the convolution layer respectively). According to the resnet paper, 73333 would be the best, as a broader receptive field might capture general information initially, while the final of feature extraction may require details. However, this trial failed, and surprisingly 55555 performed the best. Maybe that's because the recognition of images is so low that 7x7 kernel becomes relatively excessively enormous.
+\begin{figure}[htbp]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/01_resnet,53333,lr=0.005.png}
+\caption{53333,maxacc=0.7513,maxf1=0.7490}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/02_resnet,73333,lr=0.005.png}
+\caption{73333,maxacc=0.7443,maxf1=0.7439}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/03_resnet,75333,lr=0.005.png}
+\caption{75333,maxacc=0.7387,maxf1=0.7384}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/experiment_plots/04_resnet,33333,lr=0.005.png}
+\caption{33333,maxacc=0.7406,maxf1=0.7412}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/05_resnet,55555,lr=0.005.png}
+\caption{55555,maxacc=0.7491,maxf1=0.7494}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/06_resnet,55533,lr=0.005.png}
+\caption{55533,maxacc=0.7395,maxf1=0.7413}
+\end{minipage}
+\caption{distinct kernel sizes\label{figure 2}}
+\end{figure}
+\subsubsection{learning rate}
+I tried lr=0.0075,0.005,0.0025 and 0.002 and found little difference in f1score and accuracy between 0.0025 and 0.002. Finally, I selected lr=0.002, as it's slightly more stable. See \ref{figure 3}.
+\begin{figure}[htbp]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/07_resnet,55555,lr=0.0075.png}
+\caption{0.0075,maxacc=0.7295,maxf1=0.7299}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/05_resnet,55555,lr=0.005.png}
+\caption{0.005,maxacc=0.7491,maxf1=0.7494}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/08_resnet,55555,lr=0.0025.png}
+\caption{0.0025,maxacc=0.7668,maxf1=0.7651}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/09_resnet,55555,lr=0.002.png}
+\caption{0.002,maxacc=0.7669,maxf1=0.7672}
+\end{minipage}
+\caption{different lr\label{figure 3}}
+\end{figure}
+\subsection{optimizer}
+I considered AdamW, Adam, SGD and SGDM as optional optimizers. Though AdamW outperformed the others within 10 epochs, SGDM seemed to have not yet converged so I tried a larger learning rate=0.003, but it doesn't work. See \ref{figure 4}.
+\begin{figure}[htbp]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/09_resnet,55555,lr=0.002.png}
+\caption{AdamW,maxacc=0.7669,maxf1=0.7672}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/10_resnet,55555,lr=0.002,adam.png}
+\caption{Adam,maxacc=0.7622,maxf1=0.7617}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/11_resnet,55555,lr=0.002,SGD.png}
+\caption{SGD,maxacc=0.6126,maxf1=0.6085}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/12_resnet,55555,lr=0.002,SGDM,m=0.9.png}
+\caption{SGDM,maxacc=0.7553,maxf1=0.7528}
+\end{minipage}
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/13_resnet,55555,lr=0.003,SGDM,m=0.9.png}
+\caption{SGDM,lr=0.003,maxacc=0.7558,maxf1=0.7572}
+\end{minipage}
+\caption{different optimizers, default lr=0.002\label{figure 4}}
+\end{figure}
+\subsection{initialization}
+I considered He uniform, Xavier uniform and  Xavier normal. It turned out almost the same, but He uniform performed slightly better. See \ref{figure 5}.
+\begin{figure}[htbp]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/09_resnet,55555,lr=0.002.png}
+\caption{He uniform initialization,maxacc=0.7669,maxf1=0.7672}
+\end{minipage}
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/14_resnet,55555,lr=0.002,Xavieruniform.png}
+\caption{Xavier uniform initialization,maxacc=0.7639,maxf1=0.7622}
+\end{minipage}
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=6cm]{experiment_plots/15_resnet,55555,lr=0.002,Xaviernormal.png}
+\caption{Xavier normal initialization,maxacc=0.7600,maxf1=0.7600}
+\end{minipage}
+\caption{different initializing methods\label{figure 5}}
+\end{figure}
+\section{Experiments}
+\subsection{performance of different models}
+\subsubsection{accuracy}
+resnet is slightly better than cnn and much better than ViT. See \ref{figure 6}.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{experiment_plots/result/compareacc.png}
+    \caption{accuracy}
+    \label{figure 6}
+\end{figure}
+Figure\ref{figure 9} shows the top3 accuracy of resnet. It is apparently extremely high, proving its capability in certain high-fault-tolerance environment.
+\begin{figure}
+    \centering
+    \includegraphics[width=1\linewidth]{experiment_plots/result/resnettop3acc.png}
+    \caption{resnet top3 accuracy}
+    \label{figure 9}
+\end{figure}
+\subsubsection{f1 score}
+Figure \ref{figure 7} and \ref{figure 8} show the f1 score of different types of targets. Cat and dog are very difficult figured out, possibly for their similar size may get the model confused. Bird is also difficult to classify as my kernel size is quite big, thus hindering some small features.
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{experiment_plots/result/resnetf1.png}
+    \caption{resnet f1 score}
+    \label{figure 7}
+\end{figure}
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\linewidth]{experiment_plots/result/cnnf1.png}
+    \caption{cnn f1 score}
+    \label{figure 8}
+\end{figure}
+\subsubsection{inference speed}
+\ref{table 1} shows the comparison of the inference speed of different models. Given resnet is much deeper, it's certainly reasonably slower, but surprisingly doesn't lag far behind the others. Maybe that's because most time is spent to deliver tensors to SM, as the test set is small-scale. My video memory occupation record supports this assumption: my GPU is just about 20\% occupied by tensors, thus low efficiency.
+
+\begin{table}
+    \centering
+    \begin{tabular}{cc}
+        model& time(s)\\
+ cnn&38.3\\resnet& 44.4\\ViT&43.1\\
+    \end{tabular}
+    \caption{time of doing 200000 inferences in my computer(with single GPU of 5070ti)}
+    \label{table 1}
+\end{table}
+\subsection{other methods}
+\ref{table 2} shows my exploration of replacing batchnorm in resnet. The result shows batchnorm is definitely a key factor of training resnet.
+\begin{table}
+    \centering
+    \begin{tabular}{ccc}
+         method&  accuracy& f1 score\\
+         original resnet&  0.8110& 0.8095\\
+         resnet with layernorm and w/o batchnorm&  0.5708& 0.5701\\
+         resnet with dropout and w/o batchnorm&  0.7558& 0.7571\\
+    \end{tabular}
+    \caption{attempt to replace batchnorm}
+    \label{table 2}
+\end{table}
+\section{Analysis for the result}
+There's one weird thing that ViT performs extremely disappointing, with just an accuracy of about 55\% no matter how I tuned the hyperparameters (tuning process is recorded in my repository). I suspect the reason is that cifar-10 dataset is too small to converge my model (as my accuracy graph shows) and the number of my transformer layer is also too few, restricting its expressive potential. Additionally, I only conducted 20 epochs, obviously far from the needed epochs according to \href{https://blog.csdn.net/ereqewe/article/details/126636464}{\href{https://blog.csdn.net/ereqewe/article/details/126636464}{pytorch\_cifar10 学习记录（91\%准确率）\_cifar10准确率排名-CSDN博客} }. All these factors result in its poor performance.
+\section{Generally speaking}
+In this report, I present a resnet that reached an accuracy of 81.10\%, as well as some details during the training process.
+Codes are available in \href{https://github.com/Litmeb/cifar10}{\href{https://github.com/Litmeb/cifar10}{Litmeb/cifar10} }.
+\end{document}
