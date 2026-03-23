@@ -2,24 +2,15 @@ import torch
 import torch.nn as nn
 import torchvision
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import  SummaryWriter
 import einops
 import sys
+import ray.train.torch
+import tempfile
+import os
+import ray
 sys.path.append('D:\\Git\\cifar10')
-
 from metric import get_metrics
-writer=SummaryWriter('logs')
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if __name__ == '__main__':
-    transform=torchvision.transforms.Compose([torchvision.transforms.RandAugment(num_ops=2,magnitude=6),torchvision.transforms.ToTensor()])
-    cifar_trainset=torchvision.datasets.CIFAR10('CIFAR10',train=True,transform=transform,download=True)
-    cifar_testset=torchvision.datasets.CIFAR10('CIFAR10',train=False,transform=torchvision.transforms.ToTensor(),download=True)
-    print(len(cifar_trainset))
-    cifar_trainset,cifar_validateset=torch.utils.data.random_split(cifar_trainset,[40000,10000])
-    load_trainset=DataLoader(cifar_trainset,batch_size=64,shuffle=True,drop_last=True)
-    load_validateset=DataLoader(cifar_validateset,batch_size=64,shuffle=True,drop_last=True)
-    load_testset=DataLoader(cifar_testset,batch_size=64,drop_last=False)
 class residual_connection(nn.Module):
     def __init__(self,in_channel,hidden_channel,out_channel,kernel_size=3,stride=1,padding=1):
         super().__init__()
@@ -107,23 +98,26 @@ class resnet(nn.Module):
         x=self.silu4(self.fc1(x))
         x=self.fc2(x)
         return x
-if __name__ == '__main__':
+def train_func():
+    transform=torchvision.transforms.Compose([torchvision.transforms.RandAugment(num_ops=2,magnitude=6),torchvision.transforms.ToTensor()])
+    cifar_trainset=torchvision.datasets.CIFAR10('CIFAR10',train=True,transform=transform,download=True)
+    cifar_testset=torchvision.datasets.CIFAR10('CIFAR10',train=False,transform=torchvision.transforms.ToTensor(),download=True)
+    print(len(cifar_trainset))
+    cifar_trainset,cifar_validateset=torch.utils.data.random_split(cifar_trainset,[40000,10000])
+    load_trainset=DataLoader(cifar_trainset,batch_size=64,shuffle=True,drop_last=True)
+    load_validateset=DataLoader(cifar_validateset,batch_size=64,shuffle=True,drop_last=True)
+    load_testset=DataLoader(cifar_testset,batch_size=64,drop_last=False)
     model=resnet()
-    model=model.to(device)
-
-    f1_record=torch.tensor([[0,0,0,0,0,0,0,0,0,0]],device=device)
-    acc_record=torch.tensor([0],device=device)
-    precision_record=torch.tensor([[0,0,0,0,0,0,0,0,0,0]],device=device)
-    recall_record=torch.tensor([[0,0,0,0,0,0,0,0,0,0]],device=device)
+    model=ray.train.torch.prepare_model(model)
+    ray_load_trainset=ray.train.torch.prepare_data_loader(load_trainset)
+    ray_load_validateset=ray.train.torch.prepare_data_loader(load_validateset)
+    ray_load_testset=ray.train.torch.prepare_data_loader(load_testset)
     optimizer=torch.optim.AdamW(model.parameters(),lr=0.002)
     loss=nn.CrossEntropyLoss()
-    loss=loss.to(device)
-    for epoch in range(20):
+    for epoch in range(2):
         totalloss=0
-        for data in load_trainset:
+        for data in ray_load_trainset:
             imgs,label=data
-            imgs=imgs.to(device)
-            label=label.to(device)
             result=model(imgs)
             result_loss=loss(result,label)
             optimizer.zero_grad()
@@ -131,20 +125,22 @@ if __name__ == '__main__':
             optimizer.step()
             totalloss+=result_loss.item()
         print(f"epoch={epoch},loss={totalloss},",end='')
-        writer.add_scalar(tag='loss',scalar_value=totalloss,global_step=epoch)
         with torch.no_grad():
             f1,acc,precision,recall=get_metrics(model,load_validateset)
             print(f"f1={f1.mean()},acc={acc}")
-            writer.add_scalar(tag='f1',scalar_value=f1.mean(),global_step=epoch)
-            writer.add_scalar(tag='acc',scalar_value=acc,global_step=epoch)
-            f1_record=torch.cat((f1_record,f1.unsqueeze(0)),dim=0)
-            acc_record=torch.cat((acc_record,acc.unsqueeze(0)),dim=0)
-            precision_record=torch.cat((precision_record,precision.unsqueeze(0)),dim=0)
-            recall_record=torch.cat((recall_record,recall.unsqueeze(0)),dim=0)
-        torch.save(model,f'data/resnet_cifar10_{epoch}_{acc.item()}.pth')
-    # torch.save((f1_record.detach().clone()),'data/f1_record/resnet.pt')
-    # torch.save(acc_record.detach().clone(),'data/acc_record/resnet.pt')
-    # torch.save(precision_record.detach().clone(),'data/precision_record/resnet.pt')
-    # torch.save(recall_record.detach().clone(),'data/recall_record/resnet.pt')
-    writer.close()
-
+            metrics={'loss':totalloss,'epoch':epoch,'f1':f1.mean(),'acc':acc}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            torch.save(model.module.state_dict(),os.path.join(temp_dir,'model.pt'))
+            ray.train.report(metrics,checkpoint=ray.train.Checkpoint.from_directory(temp_dir))
+        if ray.train.get_context().get_world_rank()==0:
+            print(f"epoch={epoch},loss={totalloss},f1={f1.mean()},acc={acc}")
+if __name__=='__main__':
+    ray.init()
+    scaling_config=ray.train.ScalingConfig(num_workers=1)
+    trainer=ray.train.torch.TorchTrainer(train_func,scaling_config=scaling_config)
+    result=trainer.fit()
+    with result.checkpoint.as_directory() as checkpoint_dir:
+        model_state_dict=torch.load(os.path.join(checkpoint_dir,'model.pt'))
+        model=resnet()
+        model.load_state_dict(model_state_dict)
+        print(model)
